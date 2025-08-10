@@ -29,9 +29,6 @@ EMBED_MODEL = os.getenv("EMBED_MODEL")
 EMBED_API_BASE = os.getenv("EMBED_API_BASE")
 EMBED_API_KEY = os.getenv("EMBED_API_KEY")
 EMBED_SIZE = str(os.getenv("EMBED_SIZE"))
-
-
-print(CHAT_API_KEY, EMBED_MODEL, QDRANT_URL)
     
 LLM_CLIENT = ChatOpenAI(
     model_name=CHAT_MODEL,
@@ -84,15 +81,13 @@ def create_db():
 			elements = partition_html(url=url)
 			chunks = chunk_by_title(elements, max_characters=5000, overlap=500)
 			
-			for c in chunks:
+			for chunk in chunks:
 				point=PointStruct(
 					id=uuid.uuid4(),
-					vector=embed(c.text),
-					payload={"text": c.text, "url": url}
+					vector=embed(chunk.text),
+					payload={"text": chunk.text, "url": url}
 				)
 				points.append(point)
-
-		print(points)
 
 		QDRANT_CLIENT.upsert(
 			collection_name=DB_COLLECTION_NAME,
