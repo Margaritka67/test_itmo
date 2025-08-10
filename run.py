@@ -1,10 +1,14 @@
 from unstructured.partition.html import partition_html
+from unstructured.chunking.title import chunk_by_title
 from transformers import AutoTokenizer
 from openai import OpenAI, AsyncOpenAI
 from typing import List, Dict, AsyncGenerator
 from langchain_openai import ChatOpenAI
 from qdrant_client import AsyncQdrantClient
+from qdrant_client.models import Distance, VectorParams
+from qdrant_client.models import PointStruct
 import os
+import uuid
 
 TOKENIZER = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-14B-Instruct")
 
@@ -17,11 +21,10 @@ QDRANT_URL = os.getenv("QDRANT_URL")
 EMBED_MODEL = os.getenv("EMBED_MODEL")
 EMBED_API_BASE = os.getenv("EMBED_API_BASE")
 EMBED_API_KEY = os.getenv("EMBED_API_KEY")
-
+EMBED_SIZE = os.getenv("EMBED_SIZE")
 
 def count_tokens(text: str) -> int:
     return len(TOKENIZER.encode(text))
-    
     
 LLM_CLIENT = ChatOpenAI(
     model_name=CHAT_MODEL,
@@ -30,7 +33,12 @@ LLM_CLIENT = ChatOpenAI(
     temperature=0.05,
 )
 
-QUADRANT_CLIENT = AsyncQdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=10)
+EMBED_CLIENT = OpenAI(
+    api_key=EMBED_API_KEY,
+    base_url=EMBED_API_BASE,
+)
+
+QUADRANT_CLIENT = AsyncQdrantClient(url=QDRANT_URL, timeout=10)
 
 async def completion(prompt: str) -> str:
 	response = await LLM_CLIENT.ainvoke(
@@ -45,13 +53,10 @@ async def completion(prompt: str) -> str:
 	return response.content.strip()
 
 
-QUADRANT_CLIENT = AsyncQdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=10)
-
-
-async def embed(text: List[str]) -> List[List[float]]:
+def embed(text: List[str]) -> List[List[float]]:
     if len(text) == 0:
         return []
-    res = await embed_client.embeddings.create(
+    res = EMBED_CLIENT.embeddings.create(
         input=text,
         model=EMBED_MODEL,
         encoding_format="float",
@@ -64,10 +69,38 @@ async def main():
 	#Парсинг данных
 	urls = ["https://abit.itmo.ru/program/master/ai", "https://abit.itmo.ru/program/master/ai_product"]
 
+	
+	points = []
 	for url in urls:
-	    elements = partition_html(url=url)
-	    print("\n\n".join([str(el) for el in elements]))
+		elements = partition_html(url=url)
+		chunks = chunk_by_title(elements, max_characters=5000, overlap=500)
+        
+		for c in chunks:
+			row = {}
+			row['filename'] = c.metadata.filename
+			row['text'] = c.text
+			row['url'] = url
+			point=PointStruct(
+				id=uuid.uuid4(),
+				vector=embed(c.text),
+				payload={"text": c.text, "url": url}
+			)
+			points.append(row)
+
+	print(points)
+
+	#создание индекса
+	#TODO:проверка существования
+	QUADRANT_CLIENT.create_collection(
+		collection_name="itmo",
+		vectors_config=VectorParams(size=EMBED_SIZE, distance=Distance.COSINE),
+	)
+
+	QUADRANT_CLIENT.upsert(
+		collection_name="itmo",
+		points=points
+	)
     
     
     
-    
+

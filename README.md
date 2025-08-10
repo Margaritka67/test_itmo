@@ -24,3 +24,4 @@ CHAT_API_BASE='https://api.together.xyz/v1/'
 EMBED_MODEL="togethercomputer/m2-bert-80M-32k-retrieval"
 EMBED_API_BASE='https://api.together.xyz/v1/'
 EMBED_API_KEY='tgp_v1_...'
+EMBED_SIZE=768
