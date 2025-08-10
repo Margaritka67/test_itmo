@@ -1,10 +1,9 @@
 from typing import List
 from unstructured.partition.html import partition_html
 from unstructured.chunking.title import chunk_by_title
-from transformers import AutoTokenizer
 from openai import OpenAI
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from qdrant_client import AsyncQdrantClient
+from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams
 from qdrant_client.models import PointStruct
 from langchain.chains import create_retrieval_chain
@@ -14,10 +13,11 @@ from langchain_qdrant import QdrantVectorStore
 import os
 import uuid
 
+from dotenv import load_dotenv
+load_dotenv(override=True)
+
 DB_COLLECTION_NAME="itmo"
 URLS = ["https://abit.itmo.ru/program/master/ai", "https://abit.itmo.ru/program/master/ai_product"]
-
-TOKENIZER = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-14B-Instruct")
 
 CHAT_API_KEY = os.getenv("CHAT_API_KEY")
 CHAT_MODEL = os.getenv("CHAT_MODEL")
@@ -28,7 +28,10 @@ QDRANT_URL = os.getenv("QDRANT_URL")
 EMBED_MODEL = os.getenv("EMBED_MODEL")
 EMBED_API_BASE = os.getenv("EMBED_API_BASE")
 EMBED_API_KEY = os.getenv("EMBED_API_KEY")
-EMBED_SIZE = os.getenv("EMBED_SIZE")
+EMBED_SIZE = str(os.getenv("EMBED_SIZE"))
+
+
+print(CHAT_API_KEY, EMBED_MODEL, QDRANT_URL)
     
 LLM_CLIENT = ChatOpenAI(
     model_name=CHAT_MODEL,
@@ -42,7 +45,7 @@ EMBED_CLIENT = OpenAI(
     base_url=EMBED_API_BASE,
 )
 
-QDRANT_CLIENT = AsyncQdrantClient(url=QDRANT_URL, timeout=10)
+QDRANT_CLIENT = QdrantClient(url=QDRANT_URL)
 
 async def completion(prompt: str) -> str:
 	response = await LLM_CLIENT.ainvoke(
@@ -82,16 +85,12 @@ def create_db():
 			chunks = chunk_by_title(elements, max_characters=5000, overlap=500)
 			
 			for c in chunks:
-				row = {}
-				row['filename'] = c.metadata.filename
-				row['text'] = c.text
-				row['url'] = url
 				point=PointStruct(
 					id=uuid.uuid4(),
 					vector=embed(c.text),
 					payload={"text": c.text, "url": url}
 				)
-				points.append(row)
+				points.append(point)
 
 		print(points)
 
