@@ -21,7 +21,7 @@ CHAT_API_KEY='tgp_v1_...'
 CHAT_MODEL='Qwen/Qwen2.5-14B'
 CHAT_API_BASE='https://api.together.xyz/v1/'
 
-EMBED_MODEL="togethercomputer/m2-bert-80M-32k-retrieval"
+EMBED_MODEL="intfloat/multilingual-e5-large-instruct"
 EMBED_API_BASE='https://api.together.xyz/v1/'
 EMBED_API_KEY='tgp_v1_...'
-EMBED_SIZE=768
+EMBED_SIZE=1024
