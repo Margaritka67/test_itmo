@@ -5,3 +5,4 @@ unstructured[all-docs]
 tabulate
 langchain_community
 langchain_openai
+langchain_qdrant

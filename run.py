@@ -1,14 +1,21 @@
+from typing import List
 from unstructured.partition.html import partition_html
 from unstructured.chunking.title import chunk_by_title
 from transformers import AutoTokenizer
-from openai import OpenAI, AsyncOpenAI
-from typing import List, Dict, AsyncGenerator
-from langchain_openai import ChatOpenAI
+from openai import OpenAI
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import Distance, VectorParams
 from qdrant_client.models import PointStruct
+from langchain.chains import create_retrieval_chain
+from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_qdrant import QdrantVectorStore
 import os
 import uuid
+
+DB_COLLECTION_NAME="itmo"
+URLS = ["https://abit.itmo.ru/program/master/ai", "https://abit.itmo.ru/program/master/ai_product"]
 
 TOKENIZER = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-14B-Instruct")
 
@@ -22,9 +29,6 @@ EMBED_MODEL = os.getenv("EMBED_MODEL")
 EMBED_API_BASE = os.getenv("EMBED_API_BASE")
 EMBED_API_KEY = os.getenv("EMBED_API_KEY")
 EMBED_SIZE = os.getenv("EMBED_SIZE")
-
-def count_tokens(text: str) -> int:
-    return len(TOKENIZER.encode(text))
     
 LLM_CLIENT = ChatOpenAI(
     model_name=CHAT_MODEL,
@@ -38,7 +42,7 @@ EMBED_CLIENT = OpenAI(
     base_url=EMBED_API_BASE,
 )
 
-QUADRANT_CLIENT = AsyncQdrantClient(url=QDRANT_URL, timeout=10)
+QDRANT_CLIENT = AsyncQdrantClient(url=QDRANT_URL, timeout=10)
 
 async def completion(prompt: str) -> str:
 	response = await LLM_CLIENT.ainvoke(
@@ -64,43 +68,81 @@ def embed(text: List[str]) -> List[List[float]]:
     return [item.embedding for item in res.data]
 
 
-async def main():
+def create_db():
+	if not QDRANT_CLIENT.collection_exists(collection_name=DB_COLLECTION_NAME):
+		QDRANT_CLIENT.create_collection(
+			collection_name=DB_COLLECTION_NAME,
+			vectors_config=VectorParams(size=EMBED_SIZE, distance=Distance.COSINE),
+		)
 
-	#Парсинг данных
-	urls = ["https://abit.itmo.ru/program/master/ai", "https://abit.itmo.ru/program/master/ai_product"]
+		#Парсинг данных
+		points = []
+		for url in URLS:
+			elements = partition_html(url=url)
+			chunks = chunk_by_title(elements, max_characters=5000, overlap=500)
+			
+			for c in chunks:
+				row = {}
+				row['filename'] = c.metadata.filename
+				row['text'] = c.text
+				row['url'] = url
+				point=PointStruct(
+					id=uuid.uuid4(),
+					vector=embed(c.text),
+					payload={"text": c.text, "url": url}
+				)
+				points.append(row)
 
-	
-	points = []
-	for url in urls:
-		elements = partition_html(url=url)
-		chunks = chunk_by_title(elements, max_characters=5000, overlap=500)
-        
-		for c in chunks:
-			row = {}
-			row['filename'] = c.metadata.filename
-			row['text'] = c.text
-			row['url'] = url
-			point=PointStruct(
-				id=uuid.uuid4(),
-				vector=embed(c.text),
-				payload={"text": c.text, "url": url}
-			)
-			points.append(row)
+		print(points)
 
-	print(points)
+		QDRANT_CLIENT.upsert(
+			collection_name=DB_COLLECTION_NAME,
+			points=points
+		)
 
-	#создание индекса
-	#TODO:проверка существования
-	QUADRANT_CLIENT.create_collection(
-		collection_name="itmo",
-		vectors_config=VectorParams(size=EMBED_SIZE, distance=Distance.COSINE),
+def main():
+	create_db()
+
+	system_prompt = (
+		"Use the given context and not your previous knowledge to answer the question. "
+		"If you don't know the answer, say you don't know. "
+		"Context: {context}"
 	)
 
-	QUADRANT_CLIENT.upsert(
-		collection_name="itmo",
-		points=points
+	prompt = ChatPromptTemplate.from_messages(
+		[
+			("system", system_prompt),
+			("human", "{input}"),
+		]
 	)
-    
+
+	vector_store = QdrantVectorStore(
+		client=QDRANT_CLIENT,
+		collection_name=DB_COLLECTION_NAME,
+		embedding=OpenAIEmbeddings(
+			api_key=EMBED_API_KEY,
+			base_url=EMBED_API_BASE,
+			model=EMBED_MODEL,
+		),
+	)
+
+	retriever = vector_store.as_retriever()
+
+	question_answer_chain = create_stuff_documents_chain(LLM_CLIENT, prompt)
+	chain = create_retrieval_chain(retriever, question_answer_chain)
+
+	#Интерактивный цикл вопрос-ответ
+	print("RAG система готова. Задавайте вопросы (для выхода введите 'exit'):")
+	while True:
+		query = input("\nВаш вопрос: ")
+		if query.lower() == 'exit':
+			break
+			
+		result = chain.invoke({"query": query})
+		print(f"\nОтвет: {result['result']}")
+
+if __name__ == "__main__":
+    main()
     
     
 
