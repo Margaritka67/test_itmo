@@ -18,7 +18,7 @@ docker run -p 6333:6333 qdrant/qdrant
 QDRANT_URL=http://localhost:6333/
 
 CHAT_API_KEY='tgp_v1_...'
-CHAT_MODEL='Qwen/Qwen2.5-14B'
+CHAT_MODEL='Qwen/Qwen3-235B-A22B-Instruct-2507-tput'
 CHAT_API_BASE='https://api.together.xyz/v1/'
 
 EMBED_MODEL="intfloat/multilingual-e5-large-instruct"

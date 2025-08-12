@@ -6,7 +6,7 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams
 from qdrant_client.models import PointStruct
-from langchain.chains import create_retrieval_chain
+from langchain.chains import create_retrieval_chain, RetrievalQA
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_qdrant import QdrantVectorStore
@@ -57,15 +57,16 @@ async def completion(prompt: str) -> str:
 	return response.content.strip()
 
 
-def embed(text: List[str]) -> List[List[float]]:
+def embed(text: str) -> List[List[float]]:
     if len(text) == 0:
         return []
+
     res = EMBED_CLIENT.embeddings.create(
         input=text,
         model=EMBED_MODEL,
         encoding_format="float",
     )
-    return [item.embedding for item in res.data]
+    return [item.embedding for item in res.data][0]
 
 
 def create_db():
@@ -79,13 +80,12 @@ def create_db():
 		points = []
 		for url in URLS:
 			elements = partition_html(url=url)
-			chunks = chunk_by_title(elements, max_characters=5000, overlap=500)
-			
+			chunks = chunk_by_title(elements, max_characters=2000, overlap=200)
 			for chunk in chunks:
 				point=PointStruct(
-					id=uuid.uuid4(),
-					vector=embed(chunk.text),
-					payload={"text": chunk.text, "url": url}
+					id=str(uuid.uuid4()),
+					vector=embed(chunk.text.strip()),
+					payload={"page_content": chunk.text, "url": url}
 				)
 				points.append(point)
 
@@ -93,6 +93,9 @@ def create_db():
 			collection_name=DB_COLLECTION_NAME,
 			points=points
 		)
+		print("Индекс успешно создан!")
+	else:
+		print("Индекс был создан ранее.")
 
 def main():
 	create_db()
@@ -114,13 +117,13 @@ def main():
 		client=QDRANT_CLIENT,
 		collection_name=DB_COLLECTION_NAME,
 		embedding=OpenAIEmbeddings(
-			api_key=EMBED_API_KEY,
-			base_url=EMBED_API_BASE,
+			openai_api_key=EMBED_API_KEY,
+			openai_api_base=EMBED_API_BASE,
 			model=EMBED_MODEL,
 		),
 	)
 
-	retriever = vector_store.as_retriever()
+	retriever = vector_store.as_retriever(search_kwargs={"k": 10})
 
 	question_answer_chain = create_stuff_documents_chain(LLM_CLIENT, prompt)
 	chain = create_retrieval_chain(retriever, question_answer_chain)
@@ -132,8 +135,8 @@ def main():
 		if query.lower() == 'exit':
 			break
 			
-		result = chain.invoke({"query": query})
-		print(f"\nОтвет: {result['result']}")
+		result = chain.invoke({"input": query})
+		print(f"\nОтвет: {result['answer']}")
 
 if __name__ == "__main__":
     main()
